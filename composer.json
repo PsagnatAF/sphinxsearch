@@ -1,5 +1,5 @@
 {
-  "name": "ptand/sphinxsearch",
+  "name": "psagnataf/sphinxsearch",
   "description": "Laravel package to query Sphinxsearch in Laravel",
   "keywords": [
     "sphinx",
@@ -8,7 +8,7 @@
     "laravel 6"
   ],
   "minimum-stability": "dev",
-  "homepage": "http://github.com/ptandDev/sphinxsearch",
+  "homepage": "https://github.com/PsagnatAF/sphinxsearch",
   "license": "Apache-2.0",
   "authors": [
     {
