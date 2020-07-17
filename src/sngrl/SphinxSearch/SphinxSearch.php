@@ -3,6 +3,7 @@ namespace sngrl\SphinxSearch;
 
 class SphinxSearch
 {
+    protected $_required_db_params = ['host', 'port', 'dbname', 'user', 'password'];
     protected $_connection;
     protected $_index_name;
     protected $_search_string;
@@ -10,22 +11,67 @@ class SphinxSearch
     protected $_total_count;
     protected $_time;
     protected $_eager_loads;
-	protected $_raw_mysql_connection;
+    protected $_db_connection;
+    protected $_params;
+    protected $index;
 
     public function __construct()
     {
-        $host = \Config::get('sphinxsearch.host');
-        $port = \Config::get('sphinxsearch.port');
-        $timeout = \Config::get('sphinxsearch.timeout');
-        $this->_connection = new \Sphinx\SphinxClient();
-        $this->_connection->setServer($host, $port);
-        $this->_connection->setConnectTimeout($timeout);
-        $this->_connection->setMatchMode(\Sphinx\SphinxClient::SPH_MATCH_ANY);
-        $this->_connection->setSortMode(\Sphinx\SphinxClient::SPH_SORT_RELEVANCE);
-        if (extension_loaded('mysqli') && \Config::get('sphinxsearch.mysql_server')) {
-            $this->_raw_mysql_connection = mysqli_connect(\Config::get('sphinxsearch.mysql_server.host'), '', '', '', \Config::get('sphinxsearch.mysql_server.port'));
+        $this->init();
+    }
+
+    /**
+     * Set sphinx and database params and connection
+     * @return void
+     */
+    protected function init()
+    {
+        $this->_params      =   \Config::get('sphinxsearch');
+        $this->connectSphinx();
+        $this->connectDB();
+        $this->setIndex();
+    }
+    /**
+     * Connect to sphinx
+     * @return void
+     */
+    protected function connectSphinx()
+    {
+        $host               =   array_key_exists( 'host', $this->_params ) ? $this->_params['host'] : '127.0.0.1';
+        $port               =   array_key_exists( 'port', $this->_params ) ? $this->_params['port'] : 9312;
+        $timeout            =   array_key_exists( 'timeout', $this->_params ) ? $this->_params['timeout'] : 30;
+        $this->_connection  =   new \Sphinx\SphinxClient();
+        $this->_connection->setServer( $host, $port );
+        $this->_connection->setConnectTimeout( $timeout );
+        $this->_connection->setMatchMode( \Sphinx\SphinxClient::SPH_MATCH_ANY );
+        $this->_connection->setSortMode( \Sphinx\SphinxClient::SPH_SORT_RELEVANCE );
+    }
+
+    /**
+     * Connect database
+     * @return void
+     */
+    protected function connectDB()
+    {
+        if ( !array_key_exists( 'database', $this->_params ) || !count( array_diff( $this->_required_db_params , $this->_params['database'] ) ) ) throw new \Exception( 'Wrong database connection params, please check config/sphinxsearch.php' );
+
+        $driver             =   array_key_exists( 'driver', $this->_params ) ? $this->_params['driver'] : '';
+        $db_config          =   $this->_params['database'];
+        if ( $driver === 'mysql' ) {
+            if ( !extension_loaded( 'mysqli' ) ) throw new \Exception( 'mysqli extension not installed, please check php.ini' );
+            $this->_db_connection = mysqli_connect($db_config['host'], $db_config['user'], $db_config['password'], $db_config['dbname'], $db_config['port']);
+        } else if ( $driver === 'pgsql' ) {
+            if ( !extension_loaded( 'pgsql' ) ) throw new \Exception( 'pgsql extension not installed, please check php.ini' );
+            $this->_db_connection = pg_connect( 'host=' . $db_config['host'] . ' port=' . $db_config['port'] . ' dbname=' . $db_config['dbname'] . ' user=' . $db_config['user'] . ' password=' . $db_config['password'] );
         }
-        $this->_config = \Config::get('sphinxsearch.indexes');
+    }
+
+    /**
+     * Set first index in indexes
+     */
+    protected function setIndex()
+    {
+        $this->_config = $this->_params['indexes'];
         reset($this->_config);
         $this->_index_name = isset($this->_config['name']) ? implode(',', $this->_config['name']) : key($this->_config);
         $this->_eager_loads = array();
@@ -47,7 +93,7 @@ class SphinxSearch
 		}
 		foreach ($docs as &$doc)
 		{
-			$doc = "'".mysqli_real_escape_string($this->_raw_mysql_connection, strip_tags($doc))."'";
+			$doc = "'".pg_escape_string($this->_db_connection, strip_tags($doc))."'";
 		}
 
 		$extra_ql = '';
@@ -64,14 +110,14 @@ class SphinxSearch
 			}
 		}
 
-		$query = "CALL SNIPPETS((".implode(',',$docs)."),'".$index_name."','".mysqli_real_escape_string($this->_raw_mysql_connection, $query)."' ".$extra_ql.")";
+		$query = "CALL SNIPPETS((".implode(',',$docs)."),'".$index_name."','".pg_escape_string($this->_db_connection, $query)."' ".$extra_ql.")";
 		// die($query);
-		$result = mysqli_query($this->_raw_mysql_connection, $query);
+		$result = pg_query($this->_db_connection, $query);
 		// ddd($result);
 		$reply = array();
 		if ($result)
 		{
-			while ($row = mysqli_fetch_array($result, MYSQLI_ASSOC))
+			while ($row = pg_fetch_array($result, PGSQL_ASSOC))
 			{
 				$reply[] = $row['snippet'];
 			}
@@ -218,16 +264,16 @@ class SphinxSearch
                     } else if (isset($config['modelname'])) {
                         if ($this->_eager_loads) {
                             $result = call_user_func_array($config['modelname'] . "::whereIn",
-                                array($config['column'], $matchids))->orderByRaw(\DB::raw("FIELD($primaryKey, $idString)"))
+                                array($config['column'], $matchids))
                                 ->with($this->_eager_loads)->get();
                         } else {
                             $result = call_user_func_array($config['modelname'] . "::whereIn",
-                                array($config['column'], $matchids))->orderByRaw(\DB::raw("FIELD($primaryKey, $idString)"))
+                                array($config['column'], $matchids))
                                 ->get();
                         }
                     } else {
                         $result = \DB::table($config['table'])->whereIn($config['column'], $matchids)
-                            ->orderByRaw(\DB::raw("FIELD($primaryKey, $idString)"))->get();
+                            ->get();
                     }
                 }
             } else {
