@@ -148,6 +148,12 @@ class SphinxSearch
         return $this;
     }
 
+    public function whereIn($field, $data)
+    {
+        $this->whereIn[$field] = $data;
+        return $this;
+    }
+
     public function setIndexWeights(array $weights)
     {
         $this->_connection->setIndexWeights($weights);
@@ -268,8 +274,13 @@ class SphinxSearch
                                 ->with($this->_eager_loads)->get();
                         } else {
                             $result = call_user_func_array($config['modelname'] . "::whereIn",
-                                array($config['column'], $matchids))
-                                ->get();
+                                array($config['column'], $matchids));
+                            if(!empty($this->whereIn)) {
+                                foreach($this->whereIn as $field => $data) {
+                                    $result = $result->whereIn($field, $data);
+                                }
+                            }
+                            $result = $result->get();
                         }
                     } else {
                         $result = \DB::table($config['table'])->whereIn($config['column'], $matchids)
